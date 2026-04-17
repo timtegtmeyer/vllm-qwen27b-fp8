@@ -16,4 +16,5 @@ ENV MAX_MODEL_LEN="16384" \
     GPU_MEMORY_UTILIZATION="0.95" \
     DTYPE="auto"
 
+ENTRYPOINT []
 CMD ["python3", "-u", "/app/handler.py"]
