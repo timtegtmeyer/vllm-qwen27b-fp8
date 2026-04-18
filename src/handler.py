@@ -100,11 +100,18 @@ def _load_engine():
     return _llm
 
 
-# Pre-load at container startup
-try:
-    _load_engine()
-except Exception as exc:
-    log.error("Could not pre-load engine: %s", exc)
+# Pre-load at container startup — but ONLY in the main process. vLLM uses
+# `spawn` multiprocessing (warning above "Overriding VLLM_WORKER_MULTIPROC_METHOD
+# to 'spawn' … CUDA is initialized"), and spawn re-imports this module in
+# each child. Without the __main__ guard the child would call _load_engine()
+# too, recursively spawning more children until Python aborts with "An
+# attempt has been made to start a new process before the current process
+# has finished its bootstrapping phase."
+if __name__ == "__main__":
+    try:
+        _load_engine()
+    except Exception as exc:
+        log.error("Could not pre-load engine: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -205,4 +212,5 @@ def handler(job: dict) -> dict:
     }
 
 
-runpod.serverless.start({"handler": handler})
+if __name__ == "__main__":
+    runpod.serverless.start({"handler": handler})
