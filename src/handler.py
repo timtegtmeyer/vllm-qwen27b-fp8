@@ -73,9 +73,20 @@ def _load_engine():
     gpu_util = float(os.environ.get("GPU_MEMORY_UTILIZATION", "0.95"))
     dtype = os.environ.get("DTYPE", "auto")
 
+    # vLLM's default warmup captures 51 CUDA graphs (batch sizes 1→512),
+    # each consuming ~300 MB for a 27B model → ~15 GB. That OOMs on 44 GB
+    # GPUs even with a reasonable KV-cache budget. We only ever serve
+    # batch=1 with max_workers=1, so a tiny capture set covers us at
+    # near-full speed (≤3% slower than the full set on batch=1) while
+    # freeing ~12 GB for weights + KV cache. Overridable via env var
+    # for bigger GPUs.
+    capture_sizes = [int(x) for x in os.environ.get(
+        "CUDAGRAPH_CAPTURE_SIZES", "1,2,4,8,16,32"
+    ).split(",") if x.strip()]
+
     log.info(
-        "Loading vLLM engine: model=%s, max_model_len=%d, dtype=%s, tp=%d, gpu_util=%.2f",
-        MODEL_DIR, max_model_len, dtype, tensor_parallel, gpu_util,
+        "Loading vLLM engine: model=%s, max_model_len=%d, dtype=%s, tp=%d, gpu_util=%.2f, cudagraph_capture_sizes=%s",
+        MODEL_DIR, max_model_len, dtype, tensor_parallel, gpu_util, capture_sizes,
     )
 
     start = time.time()
@@ -87,6 +98,7 @@ def _load_engine():
             gpu_memory_utilization=gpu_util,
             dtype=dtype,
             trust_remote_code=True,
+            compilation_config={"cudagraph_capture_sizes": capture_sizes},
         )
         _tokenizer = _llm.get_tokenizer()
         _load_time = time.time() - start
