@@ -41,6 +41,17 @@ import logging
 
 import runpod
 
+
+def _gpu_name() -> "str | None":
+    """GPU display name for saas-side rate-accurate cost calc."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+    return None
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
@@ -212,6 +223,7 @@ def handler(job: dict) -> dict:
     return {
         "text": generated_text,
         "full_output": generated_text,
+        "gpu_name": _gpu_name(),
         "usage": {
             "prompt_tokens": len(result.prompt_token_ids),
             "completion_tokens": num_tokens,
