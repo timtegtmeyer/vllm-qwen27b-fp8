@@ -194,6 +194,35 @@ def handler(job: dict) -> dict:
     max_tokens = sp.get("max_tokens") or job_input.get("max_tokens", 2048)
     temperature = sp.get("temperature") if sp.get("temperature") is not None else job_input.get("temperature", 0.7)
 
+    # Safety net: some fact-check / analyze prompts occasionally tip over
+    # MAX_MODEL_LEN (example failure: 12289 prompt tokens against a 12288
+    # ceiling, which vLLM reports as "you requested 0 output tokens"
+    # because it calculates remaining space as negative). Instead of
+    # letting the job hard-fail and showing a cryptic vLLM error to the
+    # user, truncate the USER message content from the front until the
+    # whole prompt fits, leaving the system prompt intact — system
+    # prompts encode invariants and must not be chopped.
+    if _tokenizer is not None:
+        max_model_len = int(os.environ.get("MAX_MODEL_LEN", "16384"))
+        budget = max_model_len - int(max_tokens) - 64
+        if budget > 0:
+            prompt_tokens = _tokenizer.encode(prompt)
+            if len(prompt_tokens) > budget:
+                overflow = len(prompt_tokens) - budget
+                log.warning(
+                    "[job:%s] Prompt %d tok > budget %d (max_model_len=%d, max_tokens=%d); truncating %d head tokens from user content",
+                    job_id, len(prompt_tokens), budget, max_model_len, max_tokens, overflow,
+                )
+                # Chop the middle of the prompt — keep the first 512 tokens
+                # (system prompt + template scaffolding) and drop the rest
+                # of the overflow from the front of the USER message. This
+                # is a last-resort guard; upstream callers SHOULD cap chars
+                # before submission.
+                head_keep = min(512, len(prompt_tokens) // 4)
+                head = prompt_tokens[:head_keep]
+                tail = prompt_tokens[head_keep + overflow:]
+                prompt = _tokenizer.decode(head + tail, skip_special_tokens=False)
+
     params = SamplingParams(
         max_tokens=max_tokens,
         temperature=temperature,
